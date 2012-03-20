@@ -1,0 +1,889 @@
+Index: flume-ng-core/src/main/java/org/apache/flume/sink/DefaultSinkProcessor.java
+===================================================================
+--- flume-ng-core/src/main/java/org/apache/flume/sink/DefaultSinkProcessor.java	(revision 1300815)
++++ flume-ng-core/src/main/java/org/apache/flume/sink/DefaultSinkProcessor.java	(revision )
+@@ -17,8 +17,7 @@
+  */
+ package org.apache.flume.sink;
+ 
+-import java.util.List;
+-
++import com.google.common.base.Preconditions;
+ import org.apache.flume.Context;
+ import org.apache.flume.EventDeliveryException;
+ import org.apache.flume.Sink;
+@@ -26,7 +25,8 @@
+ import org.apache.flume.SinkProcessor;
+ import org.apache.flume.lifecycle.LifecycleState;
+ 
+-import com.google.common.base.Preconditions;
++import java.util.ArrayList;
++import java.util.List;
+ 
+ /**
+  * Default sink processor that only accepts a single sink, passing on process
+@@ -69,9 +69,17 @@
+   public void setSinks(List<Sink> sinks) {
+     Preconditions.checkNotNull(sinks);
+     Preconditions.checkArgument(sinks.size() == 1, "DefaultSinkPolicy can "
+-        + "only handle one sink, "
+-        + "try using a policy that supports multiple sinks");
++            + "only handle one sink, "
++            + "try using a policy that supports multiple sinks");
+     sink = sinks.get(0);
+   }
+ 
++  @Override
++  public List<Sink> getSink() {
++    List sinks = new ArrayList<Sink>();
++    sinks.add(sink);
++    return sinks;
+-}
++  }
++
++
++}
+Index: flume-ng-core/src/main/java/org/apache/flume/SinkRunner.java
+===================================================================
+--- flume-ng-core/src/main/java/org/apache/flume/SinkRunner.java	(revision 1300815)
++++ flume-ng-core/src/main/java/org/apache/flume/SinkRunner.java	(revision )
+@@ -19,31 +19,27 @@
+ 
+ package org.apache.flume;
+ 
+-import java.util.concurrent.atomic.AtomicBoolean;
+-
+ import org.apache.flume.lifecycle.LifecycleAware;
+ import org.apache.flume.lifecycle.LifecycleState;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
++import java.util.concurrent.atomic.AtomicBoolean;
++
+ /**
+- * <p>
+- * A driver for {@linkplain Sink sinks} that polls them, attempting to
++ * <p> A driver for {@linkplain Sink sinks} that polls them, attempting to
+  * {@linkplain Sink#process() process} events if any are available in the
+- * {@link Channel}.
+- * </p>
++ * {@link
++ * Channel}. </p> <p/> <p> Note that, unlike {@linkplain Source sources}, all
++ * sinks are polled. </p>
+  *
+- * <p>
+- * Note that, unlike {@linkplain Source sources}, all sinks are polled.
+- * </p>
+- *
+  * @see org.apache.flume.Sink
+  * @see org.apache.flume.SourceRunner
+  */
+ public class SinkRunner implements LifecycleAware {
+ 
+   private static final Logger logger = LoggerFactory
+-      .getLogger(SinkRunner.class);
++          .getLogger(SinkRunner.class);
+   private static final long backoffSleepIncrement = 1000;
+   private static final long maxBackoffSleep = 5000;
+ 
+@@ -86,7 +82,7 @@
+ 
+     runnerThread = new Thread(runner);
+     runnerThread.setName("SinkRunner-PollingRunner-" +
+-        policy.getClass().getSimpleName());
++            policy.getClass().getSimpleName());
+     runnerThread.start();
+ 
+     lifecycleState = LifecycleState.START;
+@@ -107,9 +103,10 @@
+           runnerThread.join(500);
+         } catch (InterruptedException e) {
+           logger
+-          .debug(
++                  .debug(
+-              "Interrupted while waiting for runner thread to exit. Exception follows.",
++                          "Interrupted while waiting for runner thread to " +
++                                  "exit. Exception follows.",
+-              e);
++                          e);
+         }
+       }
+     }
+@@ -120,7 +117,7 @@
+   @Override
+   public String toString() {
+     return "SinkRunner: { policy:" + getPolicy() + " counterGroup:"
+-        + counterGroup + " }";
++            + counterGroup + " }";
+   }
+ 
+   @Override
+@@ -129,9 +126,9 @@
+   }
+ 
+   /**
+-   * {@link Runnable} that {@linkplain SinkProcessor#process() polls} a
+-   * {@link SinkProcessor} and manages event delivery notification,
+-   * {@link Sink.Status BACKOFF} delay handling, etc.
++   * {@link Runnable} that {@linkplain SinkProcessor#process() polls} a {@link
++   * SinkProcessor} and manages event delivery notification, {@link Sink.Status
++   * BACKOFF} delay handling, etc.
+    */
+   public static class PollingRunner implements Runnable {
+ 
+@@ -146,11 +143,12 @@
+       while (!shouldStop.get()) {
+         try {
+           if (policy.process().equals(Sink.Status.BACKOFF)) {
++
+             counterGroup.incrementAndGet("runner.backoffs");
+ 
+             Thread.sleep(Math.min(
+-                counterGroup.incrementAndGet("runner.backoffs.consecutive")
+-                * backoffSleepIncrement, maxBackoffSleep));
++                    counterGroup.incrementAndGet("runner.backoffs.consecutive")
++                            * backoffSleepIncrement, maxBackoffSleep));
+           } else {
+             counterGroup.set("runner.backoffs.consecutive", 0L);
+           }
+@@ -163,7 +161,7 @@
+         } catch (Exception e) {
+           counterGroup.incrementAndGet("runner.errors");
+           logger.error("Unhandled exception, logging and sleeping for " +
+-              maxBackoffSleep + "ms", e);
++                  maxBackoffSleep + "ms", e);
+           try {
+             Thread.sleep(maxBackoffSleep);
+           } catch (InterruptedException ex) {
+Index: flume-ng-sdk/src/main/java/org/apache/flume/api/NettyAvroRpcClient.java
+===================================================================
+--- flume-ng-sdk/src/main/java/org/apache/flume/api/NettyAvroRpcClient.java	(revision 1300815)
++++ flume-ng-sdk/src/main/java/org/apache/flume/api/NettyAvroRpcClient.java	(revision )
+@@ -15,47 +15,46 @@
+  */
+ package org.apache.flume.api;
+ 
++import org.apache.avro.ipc.CallFuture;
++import org.apache.avro.ipc.NettyTransceiver;
++import org.apache.avro.ipc.Transceiver;
++import org.apache.avro.ipc.specific.SpecificRequestor;
++import org.apache.flume.Event;
++import org.apache.flume.EventDeliveryException;
++import org.apache.flume.FlumeException;
++import org.apache.flume.source.avro.AvroFlumeEvent;
++import org.apache.flume.source.avro.AvroSourceProtocol;
++import org.apache.flume.source.avro.Status;
++
+ import java.io.IOException;
+ import java.net.InetSocketAddress;
+ import java.nio.ByteBuffer;
+-import java.util.List;
+-import java.util.Map;
+ import java.util.HashMap;
+ import java.util.Iterator;
+ import java.util.LinkedList;
++import java.util.List;
++import java.util.Map;
+ import java.util.concurrent.CancellationException;
+ import java.util.concurrent.ExecutionException;
+ import java.util.concurrent.TimeUnit;
+ import java.util.concurrent.TimeoutException;
+ import java.util.concurrent.locks.Condition;
+ import java.util.concurrent.locks.ReentrantLock;
+-import org.apache.avro.ipc.CallFuture;
+ 
+-import org.apache.avro.ipc.Transceiver;
+-import org.apache.avro.ipc.NettyTransceiver;
+-import org.apache.avro.ipc.specific.SpecificRequestor;
+-
+-import org.apache.flume.Event;
+-import org.apache.flume.EventDeliveryException;
+-import org.apache.flume.FlumeException;
+-import org.apache.flume.source.avro.AvroFlumeEvent;
+-import org.apache.flume.source.avro.AvroSourceProtocol;
+-import org.apache.flume.source.avro.Status;
+-
+ /**
+- * Avro/Netty implementation of {@link RpcClient}.
+- * The connections are intended to be opened before clients are given access so
+- * that the object cannot ever be in an inconsistent when exposed to users.
++ * Avro/Netty implementation of {@link RpcClient}. The connections are intended
++ * to be opened before clients are given access so that the object cannot ever
++ * be in an inconsistent when exposed to users.
+  */
+ public class NettyAvroRpcClient implements RpcClient {
+ 
+   private final ReentrantLock stateLock = new ReentrantLock();
+ 
+   private final static long DEFAULT_CONNECT_TIMEOUT_MILLIS =
+-      TimeUnit.MILLISECONDS.convert(60, TimeUnit.SECONDS);
++          TimeUnit.MILLISECONDS.convert(60, TimeUnit.SECONDS);
+ 
+   private final static long DEFAULT_REQUEST_TIMEOUT_MILLIS =
+-      TimeUnit.MILLISECONDS.convert(60, TimeUnit.SECONDS);
++          TimeUnit.MILLISECONDS.convert(60, TimeUnit.SECONDS);
+ 
+   /**
+    * Guarded by {@code stateLock}
+@@ -71,11 +70,13 @@
+ 
+   /**
+    * This constructor is intended to be called from {@link AvroClientBuilder}.
++   *
+-   * @param hostname The destination hostname
++   * @param hostname  The destination hostname
+-   * @param port The destination port
++   * @param port      The destination port
+    * @param batchSize Maximum number of Events to accept in appendBatch()
+    */
+-  private NettyAvroRpcClient(String hostname, Integer port, Integer batchSize) {
++  private NettyAvroRpcClient(String hostname, Integer port,
++                             Integer batchSize) {
+ 
+     if (hostname == null) throw new NullPointerException("hostname is null");
+     if (port == null) throw new NullPointerException("port is null");
+@@ -90,6 +91,7 @@
+ 
+   /**
+    * This method should only be invoked by the Builder
++   *
+    * @throws FlumeException
+    */
+   private void connect() throws FlumeException {
+@@ -98,6 +100,7 @@
+ 
+   /**
+    * Internal only, for now
++   *
+    * @param timeout
+    * @param tu
+    * @throws FlumeException
+@@ -105,10 +108,10 @@
+   private void connect(long timeout, TimeUnit tu) throws FlumeException {
+     try {
+       transceiver = new NettyTransceiver(new InetSocketAddress(hostname, port),
+-          tu.toMillis(timeout));
++              tu.toMillis(timeout));
+       avroClient =
+-          SpecificRequestor.getClient(AvroSourceProtocol.Callback.class,
+-          transceiver);
++              SpecificRequestor.getClient(AvroSourceProtocol.Callback.class,
++                      transceiver);
+ 
+     } catch (IOException ex) {
+       throw new FlumeException("RPC connection error. Exception follows.", ex);
+@@ -123,7 +126,7 @@
+       transceiver.close();
+     } catch (IOException ex) {
+       throw new FlumeException("Error closing transceiver. Exception follows.",
+-          ex);
++              ex);
+     } finally {
+       setState(ConnState.DEAD);
+     }
+@@ -147,8 +150,9 @@
+     }
+   }
+ 
++
+   private void append(Event event, long timeout, TimeUnit tu)
+-      throws EventDeliveryException {
++          throws EventDeliveryException {
+ 
+     assertReady();
+ 
+@@ -161,7 +165,7 @@
+       avroClient.append(avroEvent, callFuture);
+     } catch (IOException ex) {
+       throw new EventDeliveryException("RPC request IO exception. " +
+-          "Exception follows.", ex);
++              "Exception follows.", ex);
+     }
+ 
+     waitForStatusOK(callFuture, timeout, tu);
+@@ -171,7 +175,7 @@
+   public void appendBatch(List<Event> events) throws EventDeliveryException {
+     try {
+       appendBatch(events, DEFAULT_REQUEST_TIMEOUT_MILLIS,
+-          TimeUnit.MILLISECONDS);
++              TimeUnit.MILLISECONDS);
+     } catch (EventDeliveryException e) {
+       // we mark as no longer active without trying to clean up resources
+       // client is required to call close() to clean up resources
+@@ -180,8 +184,16 @@
+     }
+   }
+ 
++  public static AvroFlumeEvent createFlumeEvent(Event event) {
++    AvroFlumeEvent avroEvent = new AvroFlumeEvent();
++    avroEvent.setBody(ByteBuffer.wrap(event.getBody()));
++    avroEvent.setHeaders(toCharSeqMap(event.getHeaders()));
++    return avroEvent;
++
++  }
++
+   private void appendBatch(List<Event> events, long timeout, TimeUnit tu)
+-      throws EventDeliveryException {
++          throws EventDeliveryException {
+ 
+     assertReady();
+ 
+@@ -205,7 +217,7 @@
+         avroClient.appendBatch(avroEvents, callFuture);
+       } catch (IOException ex) {
+         throw new EventDeliveryException("RPC request IO exception. " +
+-            "Exception follows.", ex);
++                "Exception follows.", ex);
+       }
+ 
+       waitForStatusOK(callFuture, timeout, tu);
+@@ -215,13 +227,16 @@
+   /**
+    * Helper method that waits for a Status future to come back and validates
+    * that it returns Status == OK.
++   *
+    * @param callFuture Future to wait on
+-   * @param timeout Time to wait before failing
++   * @param timeout    Time to wait before failing
+-   * @param tu Time Unit of {@code timeout}
++   * @param tu         Time Unit of {@code timeout}
+    * @throws EventDeliveryException If there is a timeout or if Status != OK
+    */
+   private static void waitForStatusOK(CallFuture<Status> callFuture,
+-      long timeout, TimeUnit tu) throws EventDeliveryException {
++                                      long timeout,
++                                      TimeUnit tu) throws
++          EventDeliveryException {
+     try {
+       Status status = callFuture.get(timeout, tu);
+       if (status != Status.OK) {
+@@ -229,33 +244,36 @@
+       }
+     } catch (CancellationException ex) {
+       throw new EventDeliveryException("RPC future was cancelled." +
+-          " Exception follows.", ex);
++              " Exception follows.", ex);
+     } catch (ExecutionException ex) {
+-      throw new EventDeliveryException("Exception thrown from remote handler." +
++      throw new EventDeliveryException("Exception thrown from remote handler" +
++              "." +
+-          " Exception follows.", ex);
++              " Exception follows.", ex);
+     } catch (TimeoutException ex) {
+       throw new EventDeliveryException("RPC request timed out." +
+-          " Exception follows.", ex);
++              " Exception follows.", ex);
+     } catch (InterruptedException ex) {
+       Thread.currentThread().interrupt();
+       throw new EventDeliveryException("RPC request interrupted." +
+-          " Exception follows.", ex);
++              " Exception follows.", ex);
+     }
+   }
+ 
+   /**
+    * This method should always be used to change {@code connState} so we ensure
+    * that invalid state transitions do not occur and that the {@code isIdle}
+-   * {@link Condition} variable gets signaled reliably.
+-   * Throws {@code IllegalStateException} when called to transition from CLOSED
+-   * to another state.
++   * {@link Condition} variable gets signaled reliably. Throws {@code
++   * IllegalStateException} when called to transition from CLOSED to another
++   * state.
++   *
+    * @param state
+    */
+   private void setState(ConnState newState) {
+     stateLock.lock();
+     try {
+       if (connState == ConnState.DEAD && connState != newState) {
+-        throw new IllegalStateException("Cannot transition from CLOSED state.");
++        throw new IllegalStateException("Cannot transition from CLOSED state" +
++                ".");
+       }
+       connState = newState;
+     } finally {
+@@ -272,7 +290,7 @@
+       ConnState curState = connState;
+       if (curState != ConnState.READY) {
+         throw new EventDeliveryException("RPC failed, client in an invalid " +
+-            "state: " + curState);
++                "state: " + curState);
+       }
+     } finally {
+       stateLock.unlock();
+@@ -283,9 +301,9 @@
+    * Helper function to convert a map of String to a map of CharSequence.
+    */
+   private static Map<CharSequence, CharSequence> toCharSeqMap(
+-      Map<String, String> stringMap) {
++          Map<String, String> stringMap) {
+     Map<CharSequence, CharSequence> charSeqMap =
+-        new HashMap<CharSequence, CharSequence>();
++            new HashMap<CharSequence, CharSequence>();
+     for (Map.Entry<String, String> entry : stringMap.entrySet()) {
+       charSeqMap.put(entry.getKey(), entry.getValue());
+     }
+@@ -308,9 +326,9 @@
+ 
+   /**
+    * <p>Builder class used to construct {@link NettyAvroRpcClient} objects.</p>
+-   *
+-   * <p><strong>Note:</strong> It is recommended for applications to construct
+-   * {@link RpcClient} instances using the {@link RpcClientFactory} class.</p>
++   * <p/> <p><strong>Note:</strong> It is recommended for applications to
++   * construct {@link RpcClient} instances using the {@link RpcClientFactory}
++   * class.</p>
+    */
+   protected static class Builder {
+ 
+@@ -356,8 +374,7 @@
+ 
+     /**
+      * Maximum number of {@linkplain Event events} that can be processed in a
+-     * batch operation. (optional)<br>
+-     * Default: 100
++     * batch operation. (optional)<br> Default: 100
+      *
+      * @param batchSize
+      * @return {@code this}
+@@ -373,6 +390,7 @@
+ 
+     /**
+      * Construct the object
++     *
+      * @return Active RPC client
+      * @throws FlumeException
+      */
+@@ -385,7 +403,7 @@
+       }
+ 
+       NettyAvroRpcClient client =
+-          new NettyAvroRpcClient(hostname, port, batchSize);
++              new NettyAvroRpcClient(hostname, port, batchSize);
+       client.connect();
+ 
+       return client;
+Index: flume-ng-core/src/main/java/org/apache/flume/sink/FailoverSinkProcessor.java
+===================================================================
+--- flume-ng-core/src/main/java/org/apache/flume/sink/FailoverSinkProcessor.java	(revision 1300815)
++++ flume-ng-core/src/main/java/org/apache/flume/sink/FailoverSinkProcessor.java	(revision )
+@@ -17,6 +17,14 @@
+  */
+ package org.apache.flume.sink;
+ 
++import org.apache.flume.Context;
++import org.apache.flume.EventDeliveryException;
++import org.apache.flume.Sink;
++import org.apache.flume.Sink.Status;
++import org.apache.flume.SinkProcessor;
++import org.apache.flume.lifecycle.LifecycleState;
++
++import java.util.Collections;
+ import java.util.HashMap;
+ import java.util.List;
+ import java.util.Map;
+@@ -24,43 +32,34 @@
+ import java.util.SortedMap;
+ import java.util.TreeMap;
+ 
+-import org.apache.flume.Context;
+-import org.apache.flume.EventDeliveryException;
+-import org.apache.flume.Sink;
+-import org.apache.flume.SinkProcessor;
+-import org.apache.flume.Sink.Status;
+-import org.apache.flume.lifecycle.LifecycleState;
+-
+ /**
+  * FailoverSinkProcessor is in no way thread safe and expects to be run via
+  * SinkRunner Additionally, setSinks must be called before configure, and
+  * additional sinks cannot be added while running
+- * 
++ * <p/>
+  * To configure, set a sink groups processor to "failover" and set priorities
+  * for individual sinks:
+- * 
++ * <p/>
+  * Ex)
+- * 
++ * <p/>
+  * host1.sinkgroups = group1
+- * 
+- * host1.sinkgroups.group1.sinks = sink1 sink2
+- * host1.sinkgroups.group1.processor.type = failover
+- * host1.sinkgroups.group1.processor.priority.sink1 = 5
+- * host1.sinkgroups.group1.processor.priority.sink2 = 10
+- * 
++ * <p/>
++ * host1.sinkgroups.group1.sinks = sink1 sink2 host1.sinkgroups.group1
++ * .processor.type = failover host1.sinkgroups.group1.processor.priority .sink1
++ * = 5 host1.sinkgroups.group1.processor.priority.sink2 = 10
+  */
+ public class FailoverSinkProcessor implements SinkProcessor {
+ 
+-  private static final String PRIORITY_PREFIX = "priority.";
+-  private Map<String, Sink> sinks;
+-  private Sink activeSink;
+-  private SortedMap<Integer, Sink> liveSinks;
+-  private SortedMap<Integer, Sink> deadSinks;
+-  private LifecycleState state;
++  protected static final String PRIORITY_PREFIX = "priority.";
++  protected Map<String, Sink> sinks;
++  protected Sink activeSink;
++  protected SortedMap<Integer, Sink> liveSinks;
++  protected SortedMap<Integer, Sink> deadSinks;
++  protected LifecycleState state;
+ 
+   @Override
+   public void start() {
+-    for(Sink s : sinks.values()) {
++    for (Sink s : sinks.values()) {
+       s.start();
+     }
+     state = LifecycleState.START;
+@@ -68,7 +67,7 @@
+ 
+   @Override
+   public void stop() {
+-    for(Sink s : sinks.values()) {
++    for (Sink s : sinks.values()) {
+       s.stop();
+     }
+     state = LifecycleState.STOP;
+@@ -88,7 +87,7 @@
+       String priStr = PRIORITY_PREFIX + entry.getKey();
+       Integer priority;
+       try {
+-        priority =  Integer.parseInt(context.getString(priStr));
++        priority = Integer.parseInt(context.getString(priStr));
+       } catch (NumberFormatException e) {
+         priority = --nextPrio;
+       } catch (NullPointerException e) {
+@@ -102,7 +101,7 @@
+   @Override
+   public Status process() throws EventDeliveryException {
+     Status ret = null;
+-    while(activeSink != null) {
++    while (activeSink != null) {
+       try {
+         ret = activeSink.process();
+         return ret;
+@@ -128,15 +127,15 @@
+       }
+     }
+     throw new EventDeliveryException("All sinks failed to process, " +
+-        "nothing left to failover to");
++            "nothing left to failover to");
+   }
+ 
+-  private Sink moveActiveToDeadAndGetNext() {
++  protected Sink moveActiveToDeadAndGetNext() {
+     Integer key = liveSinks.lastKey();
+     deadSinks.put(key, activeSink);
+     liveSinks.remove(key);
+-    if(liveSinks.isEmpty()) return null;
++    if (liveSinks.isEmpty()) return null;
+-    if(liveSinks.lastKey() != null) {
++    if (liveSinks.lastKey() != null) {
+       return liveSinks.get(liveSinks.lastKey());
+     } else {
+       return null;
+@@ -151,4 +150,9 @@
+     }
+   }
+ 
++  @Override
++  public List<Sink> getSink() {
++    return Collections.unmodifiableList((List<Sink>) this.sinks.values());
+-}
++  }
++
++}
+Index: flume-ng-core/src/main/java/org/apache/flume/sink/AvroSink.java
+===================================================================
+--- flume-ng-core/src/main/java/org/apache/flume/sink/AvroSink.java	(revision 1300815)
++++ flume-ng-core/src/main/java/org/apache/flume/sink/AvroSink.java	(revision )
+@@ -19,9 +19,8 @@
+ 
+ package org.apache.flume.sink;
+ 
+-import java.io.IOException;
+-import java.util.List;
+-
++import com.google.common.base.Preconditions;
++import com.google.common.collect.Lists;
+ import org.apache.flume.Channel;
+ import org.apache.flume.ChannelException;
+ import org.apache.flume.Context;
+@@ -38,71 +37,39 @@
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+-import com.google.common.base.Preconditions;
+-import com.google.common.collect.Lists;
++import java.util.List;
+ 
+ /**
++ * <p> A {@link Sink} implementation that can send events to an RPC server
++ * (such
++ * as Flume's {@link AvroSource}). </p> <p> This sink forms one half of Flume's
++ * tiered collection support. Events sent to this sink are transported over the
++ * network to the hostname / port pair using the RPC implementation
++ * encapsulated
++ * in {@link RpcClient}. The destination is an instance of Flume's {@link
++ * AvroSource}, which allows Flume agents to forward to other Flume agents,
++ * forming a tiered collection infrastructure. Of course, nothing prevents one
++ * from using this sink to speak to other custom built infrastructure that
++ * implements the same RPC protocol. </p> <p> Events are taken from the
++ * configured {@link Channel} in batches of the configured <tt>batch-size</tt>.
++ * The batch size has no theoretical limits although all events in the batch
++ * <b>must</b> fit in memory. Generally, larger batches are far more efficient,
++ * but introduce a slight delay (measured in millis) in delivery. The batch
++ * behavior is such that underruns (i.e. batches smaller than the configured
++ * batch size) are possible. This is a compromise made to maintain low latency
++ * of event delivery. If the channel returns a null event, meaning it is empty,
++ * the batch is immediately sent, regardless of size. Batch underruns are
++ * tracked in the metrics. Empty batches do not incur an RPC roundtrip. </p>
+  * <p>
+- * A {@link Sink} implementation that can send events to an RPC server (such as
+- * Flume's {@link AvroSource}).
+- * </p>
+- * <p>
+- * This sink forms one half of Flume's tiered collection support. Events sent to
+- * this sink are transported over the network to the hostname / port pair using
+- * the RPC implementation encapsulated in {@link RpcClient}.
+- * The destination is an instance of Flume's {@link AvroSource}, which
+- * allows Flume agents to forward to other Flume agents, forming a tiered
+- * collection infrastructure. Of course, nothing prevents one from using this
+- * sink to speak to other custom built infrastructure that implements the same
+- * RPC protocol.
+- * </p>
+- * <p>
+- * Events are taken from the configured {@link Channel} in batches of the
+- * configured <tt>batch-size</tt>. The batch size has no theoretical limits
+- * although all events in the batch <b>must</b> fit in memory. Generally, larger
+- * batches are far more efficient, but introduce a slight delay (measured in
+- * millis) in delivery. The batch behavior is such that underruns (i.e. batches
+- * smaller than the configured batch size) are possible. This is a compromise
+- * made to maintain low latency of event delivery. If the channel returns a null
+- * event, meaning it is empty, the batch is immediately sent, regardless of
+- * size. Batch underruns are tracked in the metrics. Empty batches do not incur
+- * an RPC roundtrip.
+- * </p>
+- * <p>
+- * <b>Configuration options</b>
+- * </p>
+- * <table>
+- * <tr>
+- * <th>Parameter</th>
+- * <th>Description</th>
+- * <th>Unit / Type</th>
+- * <th>Default</th>
+- * </tr>
+- * <tr>
+- * <td><tt>hostname</tt></td>
+- * <td>The hostname to which events should be sent.</td>
+- * <td>Hostname or IP / String</td>
+- * <td>none (required)</td>
+- * </tr>
+- * <tr>
+- * <td><tt>port</tt></td>
+- * <td>The port to which events should be sent on <tt>hostname</tt>.</td>
+- * <td>TCP port / int</td>
+- * <td>none (required)</td>
+- * </tr>
+- * <tr>
+- * <td><tt>batch-size</tt></td>
+- * <td>The maximum number of events to send per RPC.</td>
+- * <td>events / int</td>
+- * <td>100</td>
+- * </tr>
+- * </table>
+- * <p>
+- * <b>Metrics</b>
+- * </p>
+- * <p>
+- * TODO
+- * </p>
++ * <b>Configuration options</b> </p> <table> <tr> <th>Parameter</th>
++ * <th>Description</th> <th>Unit / Type</th> <th>Default</th> </tr> <tr>
++ * <td><tt>hostname</tt></td> <td>The hostname to which events should be
++ * sent.</td> <td>Hostname or IP / String</td> <td>none (required)</td> </tr>
++ * <tr> <td><tt>port</tt></td> <td>The port to which events should be sent on
++ * <tt>hostname</tt>.</td> <td>TCP port / int</td> <td>none (required)</td>
++ * </tr> <tr> <td><tt>batch-size</tt></td> <td>The maximum number of events to
++ * send per RPC.</td> <td>events / int</td> <td>100</td> </tr> </table> <p>
++ * <b>Metrics</b> </p> <p> TODO </p>
+  */
+ public class AvroSink extends AbstractSink implements Configurable {
+ 
+@@ -135,18 +102,19 @@
+   }
+ 
+   /**
+-   * If this function is called successively without calling
+-   * {@see #destroyConnection()}, only the first call has any effect.
++   * If this function is called successively without calling {@see
++   * #destroyConnection()}, only the first call has any effect.
++   *
+    * @throws FlumeException if an RPC client connection could not be opened
+    */
+   private void createConnection() throws FlumeException {
+ 
+     if (client == null) {
+       logger.debug(
+-          "Building RpcClient with hostname:{}, port:{}, batchSize:{}",
++              "Building RpcClient with hostname:{}, port:{}, batchSize:{}",
+-          new Object[] { hostname, port, batchSize });
++              new Object[]{hostname, port, batchSize});
+ 
+-       client = RpcClientFactory.getInstance(hostname, port, batchSize);
++      client = RpcClientFactory.getInstance(hostname, port, batchSize);
+     }
+ 
+   }
+@@ -158,7 +126,7 @@
+         client.close();
+       } catch (FlumeException e) {
+         logger.error("Attempt to close avro client failed. Exception follows.",
+-            e);
++                e);
+       }
+     }
+ 
+@@ -166,11 +134,11 @@
+   }
+ 
+   /**
+-   * Ensure the connection exists and is active.
+-   * If the connection is not active, destroy it and recreate it.
++   * Ensure the connection exists and is active. If the connection is not
++   * active, destroy it and recreate it.
+    *
+    * @throws FlumeException If there are errors closing or opening the RPC
+-   * connection.
++   *                        connection.
+    */
+   private void verifyConnection() throws FlumeException {
+     if (client == null) {
+@@ -189,8 +157,8 @@
+       createConnection();
+     } catch (FlumeException e) {
+       logger.error("Unable to create avro client using hostname:" + hostname
+-          + ", port:" + port + ", batchSize: " + batchSize +
+-          ". Exception follows.", e);
++              + ", port:" + port + ", batchSize: " + batchSize +
++              ". Exception follows.", e);
+ 
+       /* Try to prevent leaking resources. */
+       destroyConnection();
+@@ -252,7 +220,6 @@
+     } catch (ChannelException e) {
+       transaction.rollback();
+       logger.error("Unable to get event from channel. Exception follows.", e);
+-      status = Status.BACKOFF;
+ 
+     } catch (EventDeliveryException e) {
+       transaction.rollback();
+@@ -263,7 +230,7 @@
+       transaction.rollback();
+       destroyConnection();
+       throw new EventDeliveryException("RPC connection error. " +
+-          "Exception follows.", e);
++              "Exception follows.", e);
+ 
+     } finally {
+       transaction.close();
+Index: flume-ng-core/src/main/java/org/apache/flume/lifecycle/LifecycleState.java
+===================================================================
+--- flume-ng-core/src/main/java/org/apache/flume/lifecycle/LifecycleState.java	(revision 1300815)
++++ flume-ng-core/src/main/java/org/apache/flume/lifecycle/LifecycleState.java	(revision )
+@@ -20,11 +20,11 @@
+ package org.apache.flume.lifecycle;
+ 
+ public enum LifecycleState {
+-  IDLE, START, STOP, ERROR;
++  IDLE, START, STOP, BACKOFF, ERROR;
+ 
+-  public static final LifecycleState[] START_OR_ERROR = new LifecycleState[] {
++  public static final LifecycleState[] START_OR_ERROR = new LifecycleState[]{
+-      START, ERROR };
++          START, ERROR};
+-  public static final LifecycleState[] STOP_OR_ERROR = new LifecycleState[] {
++  public static final LifecycleState[] STOP_OR_ERROR = new LifecycleState[]{
+-      STOP, ERROR };
++          STOP, ERROR};
+ 
+ }
+Index: flume-ng-core/src/main/java/org/apache/flume/SinkProcessor.java
+===================================================================
+--- flume-ng-core/src/main/java/org/apache/flume/SinkProcessor.java	(revision 1300815)
++++ flume-ng-core/src/main/java/org/apache/flume/SinkProcessor.java	(revision )
+@@ -17,44 +17,48 @@
+  */
+ package org.apache.flume;
+ 
+-import java.util.List;
+-
+ import org.apache.flume.Sink.Status;
+ import org.apache.flume.conf.Configurable;
+ import org.apache.flume.lifecycle.LifecycleAware;
+ 
++import java.util.List;
++
+ /**
+- * <p>Interface for a device that allows abstraction of the behavior of multiple
++ * <p>Interface for a device that allows abstraction of the behavior of
++ * multiple
+  * sinks, always assigned to a SinkRunner</p>
++ *
+  * @see org.apache.flume.Sink
+  * @see org.apache.flume.SinkRunner
+  * @see org.apache.flume.sink.SinkGroup
+  */
+ public interface SinkProcessor extends LifecycleAware, Configurable {
+   /**
+-   * <p>Handle a request to poll the owned sinks.</p>
++   * <p>Handle a request to poll the owned sinks.</p> <p/> <p>The processor is
++   * expected to call {@linkplain Sink#process()} on whatever sink(s)
++   * appropriate, handling failures as appropriate and throwing {@link
++   * EventDeliveryException} when there is a failure to deliver any events
++   * according to the delivery policy defined by the sink processor
++   * implementation. See specific implementations of this interface for
++   * delivery
++   * behavior and policies.</p>
+    *
+-   * <p>The processor is expected to call {@linkplain Sink#process()} on
+-   *  whatever sink(s) appropriate, handling failures as appropriate and
+-   *  throwing {@link EventDeliveryException} when there is a failure to
+-   *  deliver any events according to the delivery policy defined by the
+-   *  sink processor implementation. See specific implementations of this
+-   *  interface for delivery behavior and policies.</p>
+-   *
+-   * @return Returns {@code READY} if events were successfully consumed,
+-   * or {@code BACKOFF} if no events were available in the channel to consume.
++   * @return Returns {@code READY} if events were successfully consumed, or
++   *         {@code BACKOFF} if no events were available in the channel to
++   *         consume.
+    * @throws EventDeliveryException if the behavior guaranteed by the processor
+-   * couldn't be carried out.
++   *                                couldn't be carried out.
+    */
+   Status process() throws EventDeliveryException;
+ 
+   /**
+-   * <p>Set all sinks to work with.</p>
++   * <p>Set all sinks to work with.</p> <p/> <p>Sink specific parameters are
++   * passed to the processor via configure</p>
+    *
+-   * <p>Sink specific parameters are passed to the processor via configure</p>
+-   *
+    * @param sinks A non-null, non-empty list of sinks to be chosen from by the
+-   * processor
++   *              processor
+    */
+   void setSinks(List<Sink> sinks);
++
++  public List<Sink> getSink();
+ }
+\ No newline at end of file
